@@ -12,15 +12,6 @@
 
 require_once("ligrila_bbva_internals.php");
 
-if(!defined("ID_COMERCIO"))
-	define('ID_COMERCIO',"");
-if(!defined("ID_TERMINAL"))
-	define('ID_TERMINAL',"999999");
-if(!defined("PALABRA_OFUSCADA"))
-	define('PALABRA_OFUSCADA',"");
-if(!defined("PALABRA_DESOFUSCAR"))
-	define('PALABRA_DESOFUSCAR',"");
-
 class Ligrila_Bbva_Utils{
 	public function convertToBbvaCurrency($cur) {
 		switch ($cur) {
@@ -206,10 +197,18 @@ class Ligrila_Bbva_Utils{
 	}
 
 	public function amountFormat($importe){
-		return number_format($importe, 2,',','');
+		//debug("Vamos a formatear $importe con el tipo ".gettype($importe));
+		$importe_limpio = number_format($importe, 2,'.','');
+		//debug("Tenemos el importe limpio ".$importe_limpio);
+		return $importe_limpio;
 	}
 	static public function amountSignature($importe){
-		$explo_preu=explode(",",$importe);// formatear el importe de 87,5 a 875
+		//Decidimos si se ha usado un . o una , para los decimales
+		if (preg_match(",",$importe)) {
+			$explo_preu=explode(",",$importe);// formatear el importe de 87,5 a 875
+		} else {
+			$explo_preu=explode(".",$importe);// formatear el importe de 87,5 a 875
+		}
 		if (empty($explo_preu[1])){
 			$explo_preu[1] = null;
 		}
@@ -225,17 +224,22 @@ class Ligrila_Bbva_Utils{
 	static function transactionID(){
 		$y=substr(date('y'),strlen(date('y'))-1,strlen(date('y')));
 		$ddd=date('z'); //Devuelve el día del año desde 0 a 365
-		if($ddd < 10) $ddd= '00'.$ddd; //añadimos 2 ceros en el caso de ser menos de 10
-		else if($ddd > 9 && $ddd < 100) $ddd= '0'.$ddd; //añadimos un 0 en el caso de ser mayor de 9 y menor de 100
+		if($ddd < 10) { 
+			$ddd= '00'.$ddd; //añadimos 2 ceros en el caso de ser menos de 10
+		} else if($ddd > 9 && $ddd < 100) {
+			$ddd= '0'.$ddd; //añadimos un 0 en el caso de ser mayor de 9 y menor de 100
+		} 
 		$hh=date('H'); //Devuelve la hora en formato 00 a 24
 		$mm=date('i'); //Devuelve los minutos desde 00 a 59
 		$ss=date('s'); //Devueve los segundos en 00 a 59
 		$an=rand('11','99'); //Devuelve un valor aleatorio ente 10-99
-		return "$y$ddd$hh$mm$ss$an";
+		$trans_id = "$y$ddd$hh$mm$ss$an" ; 
+		return $trans_id;
 	}
 
 
 	function checkoutParams($ord){
+		debug("Somos bbvautils->checkoutParams y vamos a procesar el order");
 		extract($ord);
 		$idComercio = ID_COMERCIO;
 		$idTerminal = ID_TERMINAL;
@@ -249,6 +253,8 @@ class Ligrila_Bbva_Utils{
 		$importeFirma = Ligrila_Bbva_Utils::amountSignature($importe);
 		$idioma = 'es';
 		$pais='ES';
+		debug("Tenemos el localizado ".$localizador);
+		debug("$idTerminal$idComercio$transactionID$importeFirma$moneda$localizador$clave");
 		$firma = strtoupper(sha1("$idTerminal$idComercio$transactionID$importeFirma$moneda$localizador$clave"));
 
 		return compact('idComercio','idTerminal','transactionID','ofuscada','desofuscar','clave','moneda','importe','importeFirma','idioma','pais','firma');
@@ -257,10 +263,12 @@ class Ligrila_Bbva_Utils{
 	static function getSignature($data,$localizador=null){
 		$idterminal=$idcomercio=$idtransaccion=$importe=$moneda=$estado=$coderror=$codautorizacion=$clave=null;
 		extract($data);
+		debug("Tebnemos el localizador $localizador y el estado $estado");
 
 		$importe =  Ligrila_Bbva_Utils::amountFormat($importe);
 		$importe =  Ligrila_Bbva_Utils::amountSignature($importe);
 		if(!empty($estado)){ // es una respago
+			debug("es una respago, forzar el no incluir el localizador");	
 			$localizador = null; // forzar el no incluir el localizador
 		}
 		$clave = Ligrila_Bbva_Utils::getPassword(PALABRA_OFUSCADA,PALABRA_DESOFUSCAR,ID_COMERCIO);
@@ -279,12 +287,17 @@ class Ligrila_Bbva_Utils{
 		$ret = array('accepted' => false,'error'=>false,'amount'=>0 ,'xml'=> false);
 		if (!empty($params['peticion'])){
 			try{
+				debug("vamos a procesar el xml con la peticion:". $params['peticion']);
 				$xml = new SimpleXMLElement($params['peticion']);
+				debug("Tenemos el xml");
 				if(isset($xml->respago)){
+					debug("calculamos la firma");
 					$signature = Ligrila_Bbva_Utils::getSignature(get_object_vars($xml->respago));
+					debug("La firma es: ".$signature);
 				}
 				if ((int)$xml->respago->estado != 2){
 					// hay error
+					debug("Hay un error en el pago ya que el estado de la peticion no es 2");
 					$codigo = (int)$xml->respago->coderror;
 					$ret = array(
 						'amount'=> 0,
@@ -294,6 +307,7 @@ class Ligrila_Bbva_Utils{
 					);
 				} else {
 					if($xml->respago->firma == $signature){
+						debug("Firma OK");
 						$ret = array(
 							'amount'=> (float)$xml->respago->importe,
 							'accepted' => true,
@@ -301,6 +315,7 @@ class Ligrila_Bbva_Utils{
 							'xml' => $params['peticion'],
 						);
 					} else{
+						debug("Firma MAL!!!!");
 						$ret = array(
 							'amount'=> 0,
 							'accepted' => false,
